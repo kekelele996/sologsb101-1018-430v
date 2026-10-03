@@ -22,6 +22,10 @@ export interface Room {
   outAt: string;
   /** 判定结论 */
   verdict: RoomVerdict;
+  /** 来源批次号：由平板离线批次并入时留存（手填记录无此字段） */
+  syncBatchId?: string;
+  /** 值守人：荫房记录只认值守填的那份 */
+  attendant?: string;
   createdAt: number;
   updatedAt: number;
 }

@@ -12,18 +12,21 @@ import type { Room } from '@/types/room';
 import type { Polish } from '@/types/polish';
 import type { Inlay } from '@/types/inlay';
 import type { Inspect } from '@/types/inspect';
+import type { SyncBatchRecord, SyncDraft, SyncStagingRoom } from '@/types/sync';
 
 /** 数据库名（README 与导出文件均使用该名称） */
 export const DB_NAME = 'gblacquer';
 
 /** 当前数据结构版本号 */
-export const DB_SCHEMA_VERSION = 2;
+export const DB_SCHEMA_VERSION = 3;
 
 /** localStorage 侧少量元数据键 */
 export const LS_KEYS = {
   dbVersion: 'gblacquer:db-version',
   lastBackupAt: 'gblacquer:last-backup-at',
   uiPrefs: 'gblacquer:ui-prefs',
+  /** 本机设备 id（平板封班批次中携带，用于区分各值守平板） */
+  deviceId: 'gblacquer:device-id',
 } as const;
 
 export interface UiPrefs {
@@ -49,6 +52,19 @@ export function writeUiPrefs(prefs: UiPrefs): void {
     localStorage.setItem(LS_KEYS.uiPrefs, JSON.stringify(prefs));
   } catch {
     /* 忽略隐私模式下的写入失败 */
+  }
+}
+
+/** 读取（首次自动生成）本机设备 id，平板封班批次用它标识来源设备 */
+export function readDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(LS_KEYS.deviceId);
+    if (existing) return existing;
+    const id = createId('dev');
+    localStorage.setItem(LS_KEYS.deviceId, id);
+    return id;
+  } catch {
+    return createId('dev');
   }
 }
 
@@ -84,6 +100,10 @@ class LacquerDatabase extends Dexie {
   polishes!: Table<Polish, string>;
   inlays!: Table<Inlay, string>;
   inspects!: Table<Inspect, string>;
+  // v3：荫房平板离线同步
+  syncDrafts!: Table<SyncDraft, string>;
+  syncBatches!: Table<SyncBatchRecord, string>;
+  syncStaging!: Table<SyncStagingRoom, string>;
 
   constructor() {
     super(DB_NAME);
@@ -99,7 +119,7 @@ class LacquerDatabase extends Dexie {
     });
 
     // v2：Coat 增加 paintType 索引；历史记录缺少 paintType 时按「生漆」回填
-    this.version(DB_SCHEMA_VERSION)
+    this.version(2)
       .stores({
         bodies: 'id, code, material, shape, state, updatedAt',
         coats: 'id, bodyId, seq, paintType, state, needRecheck, updatedAt',
@@ -119,13 +139,31 @@ class LacquerDatabase extends Dexie {
             if (typeof coat.thicknessUm !== 'number') coat.thicknessUm = 40;
           });
       });
+
+    // v3：荫房平板离线同步
+    // - rooms 增加批次来源索引（syncBatchId）；三张同步表全部新建，历史数据无需回填
+    // - coats 结构不变：合并只把道次快照用于漂移比对，绝不把平板旧道次写回
+    this.version(DB_SCHEMA_VERSION).stores({
+      bodies: 'id, code, material, shape, state, updatedAt',
+      coats: 'id, bodyId, seq, paintType, state, needRecheck, updatedAt',
+      rooms: 'id, bodyId, date, verdict, syncBatchId, updatedAt',
+      polishes: 'id, bodyId, seq, method, updatedAt',
+      inlays: 'id, bodyId, type, position, updatedAt',
+      inspects: 'id, bodyId, verdict, date, updatedAt',
+      syncDrafts: 'id, bodyId, sealedBatchId, updatedAt',
+      syncBatches: 'id, status, deviceId, mergedAt',
+      syncStaging: 'id, batchId, status, claimedBodyId, updatedAt',
+    });
   }
 }
 
 export const db = new LacquerDatabase();
 
-/** 六张业务表清单，事务中统一引用 */
+/** 六张业务表清单，事务中统一引用（同步留底表不参与整库备份导入） */
 const TABLE_LIST = [db.bodies, db.coats, db.rooms, db.polishes, db.inlays, db.inspects];
+
+/** 平板同步相关的三张留底表 */
+const SYNC_TABLE_LIST = [db.syncDrafts, db.syncBatches, db.syncStaging];
 
 /** 生成主键：短前缀 + 时间戳 + 随机串，避免多标签页写入冲突 */
 export function createId(prefix: string): string {
@@ -303,9 +341,21 @@ export async function clearAllTables(): Promise<void> {
   });
 }
 
-/** 清空并重新灌入演示数据 */
+/** 清空并重新灌入演示数据（同步留底表一并清空，避免演示数据与旧批次混杂） */
 export async function resetDatabase(): Promise<void> {
-  await clearAllTables();
+  await db.transaction('rw', [...TABLE_LIST, ...SYNC_TABLE_LIST], async () => {
+    await Promise.all([
+      db.bodies.clear(),
+      db.coats.clear(),
+      db.rooms.clear(),
+      db.polishes.clear(),
+      db.inlays.clear(),
+      db.inspects.clear(),
+      db.syncDrafts.clear(),
+      db.syncBatches.clear(),
+      db.syncStaging.clear(),
+    ]);
+  });
   await seedDatabase();
 }
 
@@ -332,4 +382,6 @@ export async function removeBodyCascade(bodyId: string): Promise<void> {
     await db.inspects.where('bodyId').equals(bodyId).delete();
     await db.bodies.delete(bodyId);
   });
+  // 该胎体上已认领并入的待认领记录无认领对象可展示，一并清掉；批次原档属历史留底，不动
+  await db.syncStaging.where('claimedBodyId').equals(bodyId).delete();
 }

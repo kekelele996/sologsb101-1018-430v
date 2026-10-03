@@ -11,6 +11,7 @@ import { COAT_STATE_LABEL, PAINT_TYPE_LABEL } from '@/types/coat';
 import { ROOM_VERDICT_LABEL } from '@/types/room';
 import { INSPECT_VERDICT_LABEL } from '@/types/inspect';
 import type { LacquerSnapshot } from './db';
+import type { SyncBatch } from '@/types/sync';
 
 /** 触发浏览器下载 */
 export function download(filename: string, content: string, mime: string): void {
@@ -37,6 +38,22 @@ export function exportSnapshotJson(snapshot: LacquerSnapshot): string {
   const filename = `gblacquer-backup-${stampSuffix()}.json`;
   download(filename, JSON.stringify(snapshot, null, 2), 'application/json;charset=utf-8');
   return filename;
+}
+
+/**
+ * 导出荫房平板同步批次：这是平板带给档案侧合并的文件，
+ * 与整库备份区分（kind = gblacquer-room-sync）。
+ */
+export function exportSyncBatchJson(batch: SyncBatch): string {
+  const filename = `荫房同步-${stampSuffix()}-${batch.records.length}条.json`;
+  download(filename, JSON.stringify(batch, null, 2), 'application/json;charset=utf-8');
+  return filename;
+}
+
+/** 读取并 JSON.parse 一个文件，解析失败抛错文案 */
+export async function readJsonFile(file: File): Promise<unknown> {
+  const text = await file.text();
+  return JSON.parse(text);
 }
 
 /** CSV 单元格转义 */

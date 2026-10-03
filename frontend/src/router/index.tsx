@@ -1,6 +1,6 @@
 /**
  * 路由表（与提示词逐字一致）
- * /bodies、/coats、/rooms、/polish、/inlays、/export
+ * /bodies、/coats、/rooms、/sync、/polish、/inlays、/export
  * 页面按路由懒加载，构建时自动分包。
  */
 import { Suspense, lazy, type ReactNode } from 'react';
@@ -11,6 +11,7 @@ import App from '../App';
 const BodyList = lazy(() => import('../pages/BodyList'));
 const CoatBoard = lazy(() => import('../pages/CoatBoard'));
 const RoomLog = lazy(() => import('../pages/RoomLog'));
+const SyncBoard = lazy(() => import('../pages/SyncBoard'));
 const PolishBoard = lazy(() => import('../pages/PolishBoard'));
 const InlayBoard = lazy(() => import('../pages/InlayBoard'));
 const ExportView = lazy(() => import('../pages/ExportView'));
@@ -20,6 +21,7 @@ export const ROUTES = {
   bodies: '/bodies',
   coats: '/coats',
   rooms: '/rooms',
+  sync: '/sync',
   polish: '/polish',
   inlays: '/inlays',
   export: '/export',
@@ -49,6 +51,7 @@ export const appRoutes: RouteObject[] = [
       { path: 'bodies', element: withSuspense(<BodyList />) },
       { path: 'coats', element: withSuspense(<CoatBoard />) },
       { path: 'rooms', element: withSuspense(<RoomLog />) },
+      { path: 'sync', element: withSuspense(<SyncBoard />) },
       { path: 'polish', element: withSuspense(<PolishBoard />) },
       { path: 'inlays', element: withSuspense(<InlayBoard />) },
       { path: 'export', element: withSuspense(<ExportView />) },

@@ -13,6 +13,7 @@ import {
   ExportOutlined,
   FormatPainterOutlined,
   HighlightOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { ROUTES } from './router';
 import { useBodyStore } from './stores/bodyStore';
@@ -56,15 +57,17 @@ export default function App() {
   const currentBody = bodies.find((body) => body.id === currentBodyId) ?? null;
   const selectedKey = location.pathname.startsWith('/coats')
     ? ROUTES.coats
-    : location.pathname.startsWith('/rooms')
-      ? ROUTES.rooms
-      : location.pathname.startsWith('/polish')
-        ? ROUTES.polish
-        : location.pathname.startsWith('/inlays')
-          ? ROUTES.inlays
-          : location.pathname.startsWith('/export')
-            ? ROUTES.export
-            : ROUTES.bodies;
+    : location.pathname.startsWith('/sync')
+      ? ROUTES.sync
+      : location.pathname.startsWith('/rooms')
+        ? ROUTES.rooms
+        : location.pathname.startsWith('/polish')
+          ? ROUTES.polish
+          : location.pathname.startsWith('/inlays')
+            ? ROUTES.inlays
+            : location.pathname.startsWith('/export')
+              ? ROUTES.export
+              : ROUTES.bodies;
 
   return (
     <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
@@ -87,6 +90,7 @@ export default function App() {
             { key: ROUTES.bodies, icon: <AppstoreOutlined />, label: '胎体与器型' },
             { key: ROUTES.coats, icon: <FormatPainterOutlined />, label: '髹涂道次' },
             { key: ROUTES.rooms, icon: <CloudOutlined />, label: '荫房记录' },
+            { key: ROUTES.sync, icon: <SyncOutlined />, label: '荫房同步' },
             { key: ROUTES.polish, icon: <BgColorsOutlined />, label: '打磨推光' },
             { key: ROUTES.inlays, icon: <HighlightOutlined />, label: '镶嵌纹饰' },
             { key: ROUTES.export, icon: <ExportOutlined />, label: '质检与导出' },
