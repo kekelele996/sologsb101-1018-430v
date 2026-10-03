@@ -12,12 +12,13 @@ import type { Room } from '@/types/room';
 import type { Polish } from '@/types/polish';
 import type { Inlay } from '@/types/inlay';
 import type { Inspect } from '@/types/inspect';
+import type { SyncBatch } from '@/types/sync';
 
 /** 数据库名（README 与导出文件均使用该名称） */
 export const DB_NAME = 'gblacquer';
 
 /** 当前数据结构版本号 */
-export const DB_SCHEMA_VERSION = 2;
+export const DB_SCHEMA_VERSION = 3;
 
 /** localStorage 侧少量元数据键 */
 export const LS_KEYS = {
@@ -84,6 +85,7 @@ class LacquerDatabase extends Dexie {
   polishes!: Table<Polish, string>;
   inlays!: Table<Inlay, string>;
   inspects!: Table<Inspect, string>;
+  syncBatches!: Table<SyncBatch, string>;
 
   constructor() {
     super(DB_NAME);
@@ -99,7 +101,7 @@ class LacquerDatabase extends Dexie {
     });
 
     // v2：Coat 增加 paintType 索引；历史记录缺少 paintType 时按「生漆」回填
-    this.version(DB_SCHEMA_VERSION)
+    this.version(2)
       .stores({
         bodies: 'id, code, material, shape, state, updatedAt',
         coats: 'id, bodyId, seq, paintType, state, needRecheck, updatedAt',
@@ -119,13 +121,32 @@ class LacquerDatabase extends Dexie {
             if (typeof coat.thicknessUm !== 'number') coat.thicknessUm = 40;
           });
       });
+
+    // v3：荫房平板离线同步——rooms 增加来源 / 值守 / 幂等键索引，新增 syncBatches 批次表
+    this.version(DB_SCHEMA_VERSION).stores({
+      bodies: 'id, code, material, shape, state, updatedAt',
+      coats: 'id, bodyId, seq, paintType, state, needRecheck, updatedAt',
+      rooms: 'id, bodyId, date, verdict, sourceBatchId, sourceClientId, updatedAt',
+      polishes: 'id, bodyId, seq, method, updatedAt',
+      inlays: 'id, bodyId, type, position, updatedAt',
+      inspects: 'id, bodyId, verdict, date, updatedAt',
+      syncBatches: 'id, code, status, mergedAt, updatedAt',
+    });
   }
 }
 
 export const db = new LacquerDatabase();
 
-/** 六张业务表清单，事务中统一引用 */
-const TABLE_LIST = [db.bodies, db.coats, db.rooms, db.polishes, db.inlays, db.inspects];
+/** 七张业务表清单，事务中统一引用 */
+const TABLE_LIST = [
+  db.bodies,
+  db.coats,
+  db.rooms,
+  db.polishes,
+  db.inlays,
+  db.inspects,
+  db.syncBatches,
+];
 
 /** 生成主键：短前缀 + 时间戳 + 随机串，避免多标签页写入冲突 */
 export function createId(prefix: string): string {
@@ -220,6 +241,99 @@ export async function seedDatabase(): Promise<void> {
     { id: 'inspect_0102', bodyId: 'body_02', verdict: 'rework', defectNote: '起皱（荫干过快）', inspector: '周衡', date: '2026-03-08', defectCoatSeq: 2, defectRoomId: 'room_0201', createdAt: now - 86400000, updatedAt: now - 86400000 },
   ];
 
+  // 一个尚未合并的荫房平板批次：含越界条次与编号对不上的待认领条次（不影响现有统计）
+  const syncBatches: SyncBatch[] = [
+    {
+      id: 'syncbatch_seed01',
+      code: 'SYNC-260313-01',
+      watcherName: '赵荫',
+      dispatchedAt: now - 86400000,
+      mergedAt: null,
+      status: 'open',
+      entries: [
+        {
+          entryId: 'entry_seed0101',
+          clientId: 'tab-pad07-260313-0101',
+          bodyRef: 'body_01',
+          date: '2026-03-13',
+          tempC: 29,
+          humidityPct: 52,
+          inAt: '08:00',
+          outAt: '20:30',
+          tabletVerdict: 'dry',
+          status: 'pending',
+          roomId: null,
+          resolvedBodyId: null,
+          note: '',
+        },
+        {
+          entryId: 'entry_seed0102',
+          clientId: 'tab-pad07-260313-0102',
+          bodyRef: 'body_02',
+          date: '2026-03-13',
+          tempC: 24,
+          humidityPct: 78,
+          inAt: '09:30',
+          outAt: '21:00',
+          tabletVerdict: 'suitable',
+          status: 'pending',
+          roomId: null,
+          resolvedBodyId: null,
+          note: '',
+        },
+        {
+          entryId: 'entry_seed0103',
+          clientId: 'tab-pad07-260313-0103',
+          bodyRef: 'LQ-9001',
+          date: '2026-03-13',
+          tempC: 25,
+          humidityPct: 80,
+          inAt: '10:00',
+          outAt: '22:00',
+          tabletVerdict: 'suitable',
+          status: 'unclaimed',
+          roomId: null,
+          resolvedBodyId: null,
+          note: '平板手抄编号在档案中匹配不到胎体',
+        },
+      ],
+      coatSnapshots: [
+        {
+          bodyId: 'body_01',
+          bodyCode: 'LQ-2401',
+          coats: coats.filter((coat) => coat.bodyId === 'body_01').map((coat) => ({
+            coatId: coat.id,
+            seq: coat.seq,
+            paintType: coat.paintType,
+            colorName: coat.colorName,
+            coatDate: coat.coatDate,
+            state: coat.state,
+            needRecheck: coat.needRecheck,
+          })),
+        },
+        {
+          bodyId: 'body_02',
+          bodyCode: 'LQ-2402',
+          coats: coats.filter((coat) => coat.bodyId === 'body_02').map((coat) => ({
+            coatId: coat.id,
+            seq: coat.seq,
+            paintType: coat.paintType,
+            colorName: coat.colorName,
+            coatDate: coat.coatDate,
+            state: coat.state,
+            needRecheck: coat.needRecheck,
+          })),
+        },
+      ],
+      mergedCount: 0,
+      unclaimedCount: 1,
+      duplicateCount: 0,
+      lastError: '',
+      createdAt: now - 86400000,
+      updatedAt: now - 86400000,
+    },
+  ];
+
   await db.transaction('rw', TABLE_LIST, async () => {
     await db.bodies.bulkPut(bodies);
     await db.coats.bulkPut(coats);
@@ -227,6 +341,7 @@ export async function seedDatabase(): Promise<void> {
     await db.polishes.bulkPut(polishes);
     await db.inlays.bulkPut(inlays);
     await db.inspects.bulkPut(inspects);
+    await db.syncBatches.bulkPut(syncBatches);
   });
 }
 
@@ -242,16 +357,18 @@ export interface LacquerSnapshot {
   polishes: Polish[];
   inlays: Inlay[];
   inspects: Inspect[];
+  syncBatches: SyncBatch[];
 }
 
 export async function exportSnapshot(): Promise<LacquerSnapshot> {
-  const [bodies, coats, rooms, polishes, inlays, inspects] = await Promise.all([
+  const [bodies, coats, rooms, polishes, inlays, inspects, syncBatches] = await Promise.all([
     db.bodies.toArray(),
     db.coats.toArray(),
     db.rooms.toArray(),
     db.polishes.toArray(),
     db.inlays.toArray(),
     db.inspects.toArray(),
+    db.syncBatches.toArray(),
   ]);
   return {
     app: DB_NAME,
@@ -263,6 +380,7 @@ export async function exportSnapshot(): Promise<LacquerSnapshot> {
     polishes,
     inlays,
     inspects,
+    syncBatches,
   };
 }
 
@@ -287,6 +405,8 @@ export async function importSnapshot(snapshot: LacquerSnapshot): Promise<void> {
     await db.polishes.bulkPut(snapshot.polishes);
     await db.inlays.bulkPut(snapshot.inlays);
     await db.inspects.bulkPut(snapshot.inspects);
+    // 旧版备份（v2 以前）不含离线批次表
+    if (Array.isArray(snapshot.syncBatches)) await db.syncBatches.bulkPut(snapshot.syncBatches);
   });
 }
 
@@ -299,6 +419,7 @@ export async function clearAllTables(): Promise<void> {
       db.polishes.clear(),
       db.inlays.clear(),
       db.inspects.clear(),
+      db.syncBatches.clear(),
     ]);
   });
 }
@@ -310,15 +431,16 @@ export async function resetDatabase(): Promise<void> {
 }
 
 export async function countAll(): Promise<Record<string, number>> {
-  const [bodies, coats, rooms, polishes, inlays, inspects] = await Promise.all([
+  const [bodies, coats, rooms, polishes, inlays, inspects, syncBatches] = await Promise.all([
     db.bodies.count(),
     db.coats.count(),
     db.rooms.count(),
     db.polishes.count(),
     db.inlays.count(),
     db.inspects.count(),
+    db.syncBatches.count(),
   ]);
-  return { bodies, coats, rooms, polishes, inlays, inspects };
+  return { bodies, coats, rooms, polishes, inlays, inspects, syncBatches };
 }
 
 /* ------------------------------ 级联删除 ------------------------------ */

@@ -70,6 +70,7 @@ npm run preview    # 本地预览构建产物（http://localhost:22818）
 | `/bodies` | 胎体与器型台账 | 新建胎体、按材质与器型筛选（同步 URL query），卡片回显已完成道次与最近荫房记录 | Body、Coat、Room |
 | `/coats` | 髹涂道次编排 | 拖拽调整道次先后并重编号、批量改漆种与状态、同器型自动带出上次漆种与间隔建议 | Coat、Body |
 | `/rooms` | 荫房温湿度记录 | 按区间判定适宜 / 偏干 / 偏湿，越界回写关联道次为「待复检」，支持日期区间筛选 | Room、Coat |
+| `/sync` | 荫房平板离线同步 | 模拟荫房无网时平板离线记的入出房与温湿度批次，回工作室按批「合并入档案」；只并荫房记录不回写道次，越界挂未完成道次待复检，编号对不上挂待认领，单事务合并失败整批回滚、再送幂等 | SyncBatch、Room、Coat、Body |
 | `/polish` | 打磨与推光工序 | 按道次生成目数序列（320→2000），未打磨完的道次禁止进入下一道罩漆 | Polish、Coat |
 | `/inlays` | 镶嵌纹饰登记 | 螺钿 / 蛋壳 / 描金 / 戗金登记与批量调整分类，器型示意区叠加显示 | Inlay、Body |
 | `/export` | 成品质检与导出 | 质检登记（返工定位到具体道次与荫房记录）、返工清单、JSON 导入导出与清空重播种 | Inspect 及全部模型 |
@@ -84,12 +85,16 @@ npm run preview    # 本地预览构建产物（http://localhost:22818）
 | --- | --- | --- | --- |
 | Body 胎体 | `src/types/body.ts` | `id` `code` `material`（木/脱胎/金属） `shape`（碗/盘/盒/瓶） `sizeMm` `ownerName` `state`（待髹涂/髹涂中/待荫干/已完成） | 新建后进入道次编排，卡片回显进度与最近荫房 |
 | Coat 髹涂道次 | `src/types/coat.ts` | `id` `bodyId` `seq` `paintType`（生漆/色漆/罩漆） `colorName` `coatDate` `thicknessUm` `state`（待涂/已涂/待打磨/已完成） `needRecheck` | 拖拽调序，同器型带出上次漆种与间隔建议 |
-| Room 荫房记录 | `src/types/room.ts` | `id` `bodyId` `date` `tempC` `humidityPct` `inAt` `outAt` `verdict`（适宜/偏干/偏湿） | 越界即回写关联道次为待复检 |
+| Room 荫房记录 | `src/types/room.ts` | `id` `bodyId` `date` `tempC` `humidityPct` `inAt` `outAt` `verdict`（适宜/偏干/偏湿） `watcherName` `source`（manual/sync） `sourceBatchId` `sourceClientId` `tabletVerdict` | 越界即回写关联道次为待复检；平板合并带来源与值守留底，`sourceClientId` 用于再送判重 |
+| SyncBatch 离线批次 | `src/types/sync.ts` | `id` `code` `watcherName` `dispatchedAt` `mergedAt` `status`（open/merged/failed） `entries[]`（`clientId` 幂等键、`status` 待合并/已合并/重复跳过/待认领） `coatSnapshots[]` 计数与 `lastError` | 荫房值守平板离线批次，两侧各自留底；冻结道次快照仅留底比对，绝不回写档案 |
 | Polish 打磨推光 | `src/types/polish.ts` | `id` `bodyId` `seq` `grit` `method`（水砂/推光/揩清） `durationMin` `operator` | 按道次生成目数序列 |
 | Inlay 镶嵌 | `src/types/inlay.ts` | `id` `bodyId` `type`（螺钿/蛋壳/描金/戗金） `pattern` `position` `materialNote` | 器型示意区叠加显示，支持批量改分类 |
 | Inspect 质检 | `src/types/inspect.ts` | `id` `bodyId` `verdict`（合格/返工） `defectNote` `inspector` `date` `defectCoatSeq` `defectRoomId` | 返工定位到道次与荫房记录并生成返工清单 |
 
-数据结构版本号 `DB_SCHEMA_VERSION` 定义在 `src/utils/db.ts`，当前为 `v2`：`coats` 表增加 `paintType` 索引，并在 Dexie `.upgrade()` 中为历史记录回填 `paintType = 'raw'`、`needRecheck = false`、`thicknessUm = 40`。
+数据结构版本号 `DB_SCHEMA_VERSION` 定义在 `src/utils/db.ts`，当前为 `v3`。
+
+- v1→v2：`coats` 表增加 `paintType` 索引，并在 Dexie `.upgrade()` 中为历史记录回填 `paintType = 'raw'`、`needRecheck = false`、`thicknessUm = 40`。
+- v2→v3：荫房平板离线同步——新增 `syncBatches` 批次表；`rooms` 表增加 `sourceBatchId` / `sourceClientId` 索引与 `source` / `watcherName` / `tabletVerdict` 留底字段（纯加索引，历史记录无需回填）。
 
 ---
 
@@ -99,13 +104,13 @@ npm run preview    # 本地预览构建产物（http://localhost:22818）
 sologsb101-1018/
 ├── frontend/                     # 前端源码
 │   ├── src/
-│   │   ├── types/                # body.ts coat.ts room.ts polish.ts inlay.ts inspect.ts
-│   │   ├── stores/               # bodyStore.ts coatStore.ts roomStore.ts
+│   │   ├── types/                # body.ts coat.ts room.ts polish.ts inlay.ts inspect.ts sync.ts
+│   │   ├── stores/               # bodyStore.ts coatStore.ts roomStore.ts syncStore.ts
 │   │   ├── components/common/    # StageTag.tsx FilterBar.tsx StatBadge.tsx EmptyPanel.tsx
 │   │   ├── hooks/                # useCoatProgress.ts useIdbTable.ts
-│   │   ├── pages/                # BodyList.tsx CoatBoard.tsx RoomLog.tsx PolishBoard.tsx InlayBoard.tsx ExportView.tsx
+│   │   ├── pages/                # BodyList.tsx CoatBoard.tsx RoomLog.tsx SyncCenter.tsx PolishBoard.tsx InlayBoard.tsx ExportView.tsx
 │   │   ├── router/               # index.tsx
-│   │   ├── utils/                # humidity.ts db.ts export.ts
+│   │   ├── utils/                # humidity.ts db.ts export.ts sync.ts
 │   │   ├── styles/               # main.css
 │   │   ├── App.tsx main.tsx
 │   ├── public/favicon.svg
@@ -125,9 +130,17 @@ sologsb101-1018/
 
 ## 七、数据存储说明
 
-- **IndexedDB（Dexie，数据库名 `gblacquer`）**：6 张业务表 `bodies` / `coats` / `rooms` / `polishes` / `inlays` / `inspects`，由 `src/utils/db.ts` 统一定义 schema、版本号与升级迁移；`initDatabase()` 在首次打开时自动播种**三层互相引用**的演示数据（Body → Coat / Room → Polish / Inlay / Inspect，固定 id 如 `body_01`、`coat_0101`），播种幂等。
+- **IndexedDB（Dexie，数据库名 `gblacquer`）**：7 张业务表 `bodies` / `coats` / `rooms` / `polishes` / `inlays` / `inspects` / `syncBatches`，由 `src/utils/db.ts` 统一定义 schema、版本号与升级迁移；`initDatabase()` 在首次打开时自动播种**三层互相引用**的演示数据（Body → Coat / Room / SyncBatch → Polish / Inlay / Inspect，固定 id 如 `body_01`、`coat_0101`、`syncbatch_seed01`），播种幂等。
+- **离线同步语义（`/sync`，引擎在 `src/utils/sync.ts`）**：
+  1. 荫房无网，值守在平板离线记入房 / 出房与温湿度，回工作室按批合并；
+  2. 荫房记录只认值守填的那份——温湿度与出入房时间原样入库，判定按档案统一规则复判，值守原判存入 `tabletVerdict` 留底；
+  3. 平板存的是同步前道次，仅冻结为 `coatSnapshots` 留底比对，**合并不回写 coats**，工序管理员推进过的道次不会被带回去；
+  4. 荫干窗口越界，只把该胎体**没做完**的道次（非「已完成」）挂待复检，胎体卡片与越界统计随后自动更新；
+  5. bodyId 与编号都匹配不上的条次挂**待认领**，留在批次里不挡其他条次；认领后随下次合并并入；
+  6. 合并为 rooms + coats + syncBatches 的**单事务**：中途失败整批回滚（工序台账零变化），批次留 `failed` 底；再送按 `sourceClientId` 幂等，已在档案中的条次标「重复跳过」，不多出记录；
+  7. 两侧各自留底：合并后批次不删除（含认领状态 / 错误信息），删批次只删平板留底，不影响已并入档案的荫房记录。
 - **localStorage**：仅存元数据 —— `gblacquer:db-version`（本地结构版本）、`gblacquer:last-backup-at`（最近导出时间）、`gblacquer:ui-prefs`（当前选中胎体）。
-- **备份**：`/export` 页可导出 JSON（6 张表全量数据 + 结构版本号），导入时校验 `app` 字段与各集合数组完整性，覆盖导入前二次确认；另有返工清单 TXT 与工序台账 CSV。
+- **备份**：`/export` 页可导出 JSON（7 张表全量数据 + 结构版本号；旧版 v2 备份缺少 syncBatches 集合时按空批次兼容导入），导入时校验 `app` 字段与各集合数组完整性，覆盖导入前二次确认；另有返工清单 TXT 与工序台账 CSV。
 - **隐私与无状态**：数据不上传任何服务器，容器不挂载命名卷；清理浏览器站点数据或更换浏览器会丢失档案，请定期导出备份。
 
 ---

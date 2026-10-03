@@ -13,11 +13,13 @@ import {
   ExportOutlined,
   FormatPainterOutlined,
   HighlightOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { ROUTES } from './router';
 import { useBodyStore } from './stores/bodyStore';
 import { useCoatStore } from './stores/coatStore';
 import { useRoomStore } from './stores/roomStore';
+import { useSyncStore } from './stores/syncStore';
 import { initDatabase } from './utils/db';
 import { BODY_MATERIAL_LABEL, BODY_SHAPE_LABEL, BODY_STATE_LABEL } from './types/body';
 
@@ -35,6 +37,8 @@ export default function App() {
   const loadCoats = useCoatStore((state) => state.loadCoats);
   const rooms = useRoomStore((state) => state.rooms);
   const loadRooms = useRoomStore((state) => state.loadRooms);
+  const syncBatches = useSyncStore((state) => state.batches);
+  const loadSyncBatches = useSyncStore((state) => state.loadBatches);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +46,7 @@ export default function App() {
       try {
         await initDatabase();
         if (cancelled) return;
-        await Promise.all([loadBodies(), loadCoats(), loadRooms()]);
+        await Promise.all([loadBodies(), loadCoats(), loadRooms(), loadSyncBatches()]);
       } catch (error) {
         if (cancelled) return;
         message.error(`本地数据库初始化失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -51,20 +55,24 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [loadBodies, loadCoats, loadRooms, message]);
+  }, [loadBodies, loadCoats, loadRooms, loadSyncBatches, message]);
 
   const currentBody = bodies.find((body) => body.id === currentBodyId) ?? null;
+  const pendingSyncCount = syncBatches.filter((batch) => batch.status !== 'merged').length;
+  const unclaimedCount = syncBatches.reduce((sum, batch) => sum + batch.unclaimedCount, 0);
   const selectedKey = location.pathname.startsWith('/coats')
     ? ROUTES.coats
     : location.pathname.startsWith('/rooms')
       ? ROUTES.rooms
-      : location.pathname.startsWith('/polish')
-        ? ROUTES.polish
-        : location.pathname.startsWith('/inlays')
-          ? ROUTES.inlays
-          : location.pathname.startsWith('/export')
-            ? ROUTES.export
-            : ROUTES.bodies;
+      : location.pathname.startsWith('/sync')
+        ? ROUTES.sync
+        : location.pathname.startsWith('/polish')
+          ? ROUTES.polish
+          : location.pathname.startsWith('/inlays')
+            ? ROUTES.inlays
+            : location.pathname.startsWith('/export')
+              ? ROUTES.export
+              : ROUTES.bodies;
 
   return (
     <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
@@ -87,6 +95,17 @@ export default function App() {
             { key: ROUTES.bodies, icon: <AppstoreOutlined />, label: '胎体与器型' },
             { key: ROUTES.coats, icon: <FormatPainterOutlined />, label: '髹涂道次' },
             { key: ROUTES.rooms, icon: <CloudOutlined />, label: '荫房记录' },
+            {
+              key: ROUTES.sync,
+              icon: <SyncOutlined />,
+              label: (
+                <Space size={6}>
+                  <span>荫房平板同步</span>
+                  {pendingSyncCount > 0 ? <Badge count={pendingSyncCount} size="small" color="#c9963c" /> : null}
+                  {unclaimedCount > 0 ? <Badge count={unclaimedCount} size="small" color="#b03a2e" /> : null}
+                </Space>
+              ),
+            },
             { key: ROUTES.polish, icon: <BgColorsOutlined />, label: '打磨推光' },
             { key: ROUTES.inlays, icon: <HighlightOutlined />, label: '镶嵌纹饰' },
             { key: ROUTES.export, icon: <ExportOutlined />, label: '质检与导出' },

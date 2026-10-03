@@ -173,6 +173,24 @@ export default function RoomLog() {
       ),
     },
     {
+      title: '来源 / 值守',
+      key: 'source',
+      width: 130,
+      render: (_value, record) =>
+        record.source === 'sync' ? (
+          <Space size={4} wrap>
+            <Tag color="geekblue">平板合并</Tag>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {record.watcherName || '值守未署名'}
+            </Typography.Text>
+          </Space>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            手工登记{record.watcherName ? ` · ${record.watcherName}` : ''}
+          </Typography.Text>
+        ),
+    },
+    {
       title: '荫干建议',
       key: 'advice',
       render: (_value, record) => (
@@ -330,6 +348,9 @@ export default function RoomLog() {
               <Input type="time" />
             </Form.Item>
           </Space>
+          <Form.Item name="watcherName" label="值守人（可选，平板合并批次自动带入）">
+            <Input placeholder="如：赵荫" maxLength={20} />
+          </Form.Item>
           <Space size={12} style={{ display: 'flex' }}>
             <Form.Item name="tempC" label="温度（℃）" rules={[{ required: true }]} style={{ flex: 1 }}>
               <InputNumber min={5} max={45} style={{ width: '100%' }} />

@@ -20,8 +20,18 @@ export interface Room {
   inAt: string;
   /** 出房时间 HH:mm */
   outAt: string;
-  /** 判定结论 */
+  /** 判定结论（档案侧统一规则复判；离线合并时以该字段为准，值守原判留 tabletVerdict） */
   verdict: RoomVerdict;
+  /** 荫房值守人：离线合并带入，手工登记可为空 */
+  watcherName?: string;
+  /** 来源：手工登记（默认）/ 平板离线批次合并 */
+  source?: 'manual' | 'sync';
+  /** 来源离线批次 id */
+  sourceBatchId?: string;
+  /** 平板条次全局幂等键：再送一次据此判重，不多出记录 */
+  sourceClientId?: string;
+  /** 值守在平板上的原始判定，仅留底 */
+  tabletVerdict?: RoomVerdict;
   createdAt: number;
   updatedAt: number;
 }
@@ -56,5 +66,6 @@ export function createEmptyRoomDraft(bodyId: string): RoomDraft {
     inAt: '09:00',
     outAt: '21:00',
     verdict: 'suitable',
+    watcherName: '',
   };
 }
